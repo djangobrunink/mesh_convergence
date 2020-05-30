@@ -43,91 +43,71 @@ def getMaxMises(odbName, elsetName):
             odb.close()
 
     """ Initialize maximum values """
-    maxMises = -0.1
+    totals33 = -0.1
+    maxE33 = -0.1
     maxElemMises = 0
     maxStepMises = "_None_"
     maxFrameMises = -1
     Stress = 'S'
 
-    maxDisp = -0.1
-    maxElemDisp = 0
-    maxStepDisp = "_None_"
-    maxFrameDisp = -1
-    Disp = 'E'
-
     isStressPresent = False
-    isDispPresent = False
     for step in odb.steps.values():
         frame = step.frames[-1]
         allFields = frame.fieldOutputs
-        disp = frame.fieldOutputs['U'].getSubset(region=elemset).values
-        print(disp)
-        print(allFields)
-        if Disp in allFields:
-            isDispPresent = True
-            dispSet = allFields[Disp]
-            if elemset:
-                dispSet = dispSet.getSubset(region=elemset)
-                print(dispSet)
-                print(dispSet.values)
-            for dispValue in dispSet.values:
-                print("test")
-                print(dispValue)
-                if dispValue.maxPrincipal > maxDisp:
-                    maxDisp = dispValue.maxPrincipal
-                    maxElemDisp = dispValue.elementLabel
-                    maxStepDisp = step.name
-                    maxFrameDisp = frame.incrementNumber
-
         if Stress in allFields:
             isStressPresent = True
             stressSet = allFields[Stress]
             if elemset:
                 stressSet = stressSet.getSubset(region=elemset)
-                print(stressSet)
             for stressValue in stressSet.values:
-                if stressValue.mises > maxMises:
-                    maxMises = stressValue.mises
+                totals33 += stressValue.data[2]
+
+                if stressValue.mises > totals33:
+                    maxE33 = stressValue.data[2]
                     maxElemMises = stressValue.elementLabel
                     maxStepMises = step.name
                     maxFrameMises = frame.incrementNumber
-    if isDispPresent:
-        print('Maximum Displacement %s is %f in element %d' % (region, maxDisp, maxElemDisp))
-        print('Location: frame # %d  step:  %s ' % (maxFrameDisp, maxStepDisp))
-        returnValue = maxDisp
-    else:
-        print('Displacement output is not available in'
-              'the output database : %s\n' % odb.name)
-        returnValue = None
+    # if isForcePresent:
+    #    print('Maximum Displacement %s is %f in element %d' % (region, maxForce, maxElemForce))
+    #    print('Location: frame # %d  step:  %s ' % (maxFrameForce, maxStepForce))
+    #    returnValue = maxForce
 
     if isStressPresent:
-        print('Maximum von Mises stress %s is %f in element %d' % (region, maxMises, maxElemMises))
+        print('Total stress 33 direction is %s' % totals33)
+        print('Maximum e33 stress %s is %f in element %d' % (region, maxE33, maxElemMises))
         print('Location: frame # %d  step:  %s ' % (maxFrameMises, maxStepMises))
-        returnValue = (returnValue, maxMises)
+        returnValue = (maxE33, totals33)
     else:
         print('Stress output is not available in'
               'the output database : %s\n' % odb.name)
-        returnValue = (returnValue, None)
+        returnValue = (None, None)
 
     """ Close the output database before exiting the program """
     odb.close()
     return returnValue
 
-# , 9, 11, 13, 15, 17, 19, 21, 23, 25)
-for i in range(100):
-    meshRange[i] = exp(-i / 12 + 250 / 60) + 7
+
+# filename = "Job-Linear_Elastic"
+filename = "Job-Hyperelastic"
+# filename = "Job-Viscoelastic"
+
+# Start of program
+path = r"C:\Users\Django\Documents\TU Delft\Master\Year 1\Q3\Computational Mechanics of Tissues and Cells - BM41090\Assignment\Workshop Assignment 2\New Geom"
+path += "\\" + filename + ".odb"
+
+meshRange = np.zeros(100)
+for i in range(len(meshRange)):
+    meshRange[i] = exp(-i / 12 + 250 / 60) + 3  # this custom formula checks 100 appropriate sizes of the model.
 
 meshNumber = np.zeros(len(meshRange))
-maxMises = np.zeros(len(meshRange))
-maxDisp = np.zeros(len(meshRange))
-path = r"C:\Users\Django\Documents\TU Delft\Master\Year 1\Q3\Computational Mechanics of Tissues and Cells - BM41090\Assignment\Workshop Assignment 2\Job-2.odb"
+maxE33 = np.zeros(len(meshRange))
+totalE33 = np.zeros(len(meshRange))
 previous_part = 0
 for i, size in enumerate(meshRange):
     """Generate Mesh"""
     myOdb = session.openOdb(path)
-    # session.viewports['Viewport: 1'].setValues(displayedObject=myOdb)
 
-    part = mdb.models['Model-1'].parts['Part-1']
+    part = mdb.models['Model-1'].parts['disc']
     part.seedPart(size)
     part.generateMesh()
     myOdb.close()
@@ -140,25 +120,25 @@ for i, size in enumerate(meshRange):
     else:
         print("Starting analysis with %s elements and %s nodes." % (len(part.elements), len(part.nodes)))
 
-    mdb.jobs['Job-2'].submit()
-    mdb.jobs['Job-2'].waitForCompletion()
+    mdb.jobs[filename].submit()
+    mdb.jobs[filename].waitForCompletion()
     meshNumber[i] = len(part.nodes)
     session.viewports['Viewport: 1'].forceRefresh()
 
-    maxMises[i], maxDisp[i] = getMaxMises("Job-2.odb", " ALL ELEMENTS")
+    maxE33[i], totalE33[i] = getMaxMises(filename + ".odb", "SURFACE")
     previous_part = len(part.elements)
 
 """Remove zeros"""
-maxMises = maxMises[maxMises != 0]
-maxDisp = maxDisp[maxDisp != 0]
+maxE33 = maxE33[maxE33 != 0]
+totalE33 = totalE33[totalE33 != 0]
 meshNumber = meshNumber[meshNumber != 0]
 
 """Print"""
 myOdb = session.openOdb(path)
-data = []
-for i, (number, mises) in enumerate(zip(meshNumber, maxMises)):
-    data.append((number, mises))
+data1 = []
+for i, (number, maxE33_) in enumerate(zip(meshNumber, maxE33)):
+    data1.append((number, maxE33_))
 
-session.XYData(name="Mesh Convergence", data=data)
+session.XYData(name="Mesh Convergence (Max)", data=data1)
 print("Done!")
 myOdb.close()
