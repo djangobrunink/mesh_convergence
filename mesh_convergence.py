@@ -17,6 +17,74 @@ from odbAccess import *
 from sys import argv, exit
 import numpy as np
 
+def getMaxForce(odbName, ndsetName):
+    """ Print max force location and value given odbName
+        and ndset(optional)
+    """
+    returnValue = None
+    ndset = nodeset = None
+    region = "over the entire model"
+    """ Open the output database """
+    odb = openOdb(odbName)
+    assembly = odb.rootAssembly
+
+    """ Check to see if the element set exists
+        in the assembly
+    """
+    if ndsetName:
+        try:
+            nodeset = assembly.nodeSets[ndsetName]
+            region = " in the node set : " + ndsetName
+        except KeyError:
+            print('An assembly level ndset named %s does'
+                  'not exist in the output database %s'
+                  % (ndsetName, odb))
+            odb.close()
+
+    """ Initialize maximum values """
+    totalforce = -0.1
+    maxForce = -0.1
+    maxElemForce = 0
+    maxStepForce = "_None_"
+    maxFrameForce = -1
+    Force = 'TF'
+
+    isForcePresent = False
+    for step in odb.steps.values():
+        frame = step.frames[-1]
+        allFields = frame.fieldOutputs
+        if Force in allFields:
+            isForcePresent = True
+            forceSet = allFields[Force]
+            if nodeset:
+                forceSet = forceSet.getSubset(region=nodeset)
+            for forceValue in forceSet.values:
+                totalforce += forceValue.magnitude
+                if forceValue.magnitude > totalforce:
+                    maxForce = forceValue.magnitude
+                    maxElemForce = forceValue.nodeLabel
+                    maxStepForce = step.name
+                    maxFrameForce = frame.incrementNumber
+    # if isForcePresent:
+    #    print('Maximum Displacement %s is %f in element %d' % (region, maxForce, maxElemForce))
+    #    print('Location: frame # %d  step:  %s ' % (maxFrameForce, maxStepForce))
+    #    returnValue = maxForce
+
+    if isForcePresent:
+        print('Total stress 33 direction is %s' % totalforce)
+        print('Maximum e33 stress %s is %f in element %d' % (region, maxForce, maxElemForce))
+        print('Location: frame # %d  step:  %s ' % (maxFrameForce, maxStepForce))
+        returnValue = (maxForce, totalforce)
+    else:
+        print('Stress output is not available in'
+              'the output database : %s\n' % odb.name)
+        returnValue = (None, None)
+
+    """ Close the output database before exiting the program """
+    odb.close()
+    return returnValue
+
+
 
 def getMaxMises(odbName, elsetName):
     """ Print max mises location and value given odbName
@@ -88,8 +156,10 @@ def getMaxMises(odbName, elsetName):
 
 
 # filename = "Job-Linear_Elastic"
-filename = "Job-Hyperelastic"
-# filename = "Job-Viscoelastic"
+# filename = "Job-Hyperelastic"
+filename = "Job-Viscoelastic"
+FORCE = True
+
 
 # Start of program
 path = r"C:\Users\Django\Documents\TU Delft\Master\Year 1\Q3\Computational Mechanics of Tissues and Cells - BM41090\Assignment\Workshop Assignment 2\New Geom"
@@ -102,6 +172,8 @@ for i in range(len(meshRange)):
 meshNumber = np.zeros(len(meshRange))
 maxE33 = np.zeros(len(meshRange))
 totalE33 = np.zeros(len(meshRange))
+maxForce = np.zeros(len(meshRange))
+totalForce = np.zeros(len(meshRange))
 previous_part = 0
 for i, size in enumerate(meshRange):
     """Generate Mesh"""
@@ -125,20 +197,32 @@ for i, size in enumerate(meshRange):
     meshNumber[i] = len(part.nodes)
     session.viewports['Viewport: 1'].forceRefresh()
 
-    maxE33[i], totalE33[i] = getMaxMises(filename + ".odb", "SURFACE")
+    if FORCE:
+        maxForce[i], totalForce[i] = getMaxForce(filename + ".odb", "BOTTOM")
+    else:
+        maxE33[i], totalE33[i] = getMaxMises(filename + ".odb", "SURFACE")
+
     previous_part = len(part.elements)
 
 """Remove zeros"""
 maxE33 = maxE33[maxE33 != 0]
 totalE33 = totalE33[totalE33 != 0]
+maxForce = maxForce[maxForce != 0]
+totalForce = totalForce[totalForce != 0]
 meshNumber = meshNumber[meshNumber != 0]
 
 """Print"""
 myOdb = session.openOdb(path)
 data1 = []
-for i, (number, maxE33_) in enumerate(zip(meshNumber, maxE33)):
-    data1.append((number, maxE33_))
 
-session.XYData(name="Mesh Convergence (Max)", data=data1)
+if FORCE:
+    for i, (number, totalForce_) in enumerate(zip(meshNumber, totalForce)):
+        data1.append((number, totalForce_))
+
+else:
+    for i, (number, maxE33_) in enumerate(zip(meshNumber, maxE33)):
+        data1.append((number, maxE33_))
+
+session.XYData(name="Mesh Convergence (Force)", data=data1)
 print("Done!")
 myOdb.close()
